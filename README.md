@@ -255,26 +255,37 @@ optional arguments:
 
 ## How It Works
 
-The script compares each adjacent pair of pages (page *i* vs page *i*+1) after stripping ephemeral footers like page numbers. A four-level detection cascade decides whether page *i* is a transitional half-state that should be removed:
+The script compares each adjacent pair of pages (page *i* vs page *i*+1) after stripping ephemeral footers like page numbers.
+
+**Core principle: "宁可多留也不要错删"** (rather keep than wrongly delete). Safety checks for images and unique text blocks run **before** any removal decision. Borderline cases are kept but flagged for human review.
+
+### Safety pre-checks (veto removal — page KEPT regardless)
+
+These run first, before any text comparison. Any one of them firing blocks removal:
+
+| Pre-check | Condition | Rationale |
+|-----------|-----------|-----------|
+| **Empty page** | ≤10 chars of text | Image-only or nearly empty slides |
+| **Unique images** | Page *i* has images not in page *i*+1 | Prevents losing `\only` image overlays |
+| **Unique text blocks** | Any block on page *i* has <50% word overlap with page *i*+1 | Prevents losing unique content |
 
 ### Detection cascade
 
-| Level | Condition | Interpretation |
-|-------|-----------|----------------|
-| **1 — Exact Duplicate** | `text_i == text_{i+1}` | Same slide rendered on multiple pages (only page number differs) |
-| **2 — Strict Subset** | `text_i ⊂ text_{i+1}` | Classic `\pause` — content accumulates across pages |
-| **3 — Word-Set Subset** | `words_i ⊂ words_{i+1}` | Reordered headers, e.g. `"Outline"` → `"Overview Outline"` |
-| **4 — Near-Duplicate** | Similarity ≥ 98% + safety checks pass | Text-extraction artifacts / formula rendering differences |
+If all safety pre-checks pass, the cascade proceeds:
 
-If none of the above holds, page *i* has unique content → **KEEP**.
+| Level | Condition | Action | Confidence |
+|-------|-----------|--------|------------|
+| **1 — Exact Duplicate** | `text_i == text_{i+1}` | REMOVE | HIGH |
+| **2 — Strict Subset** | `text_i ⊂ text_{i+1}` | REMOVE | HIGH |
+| **3 — Word-Set Subset** | `words_i ⊂ words_{i+1}` | REMOVE | HIGH |
+| **4 — Near-Duplicate** | Similarity ≥ 98% | REMOVE | MEDIUM |
+| **5 — Borderline** | Similarity ≥ 90% (but < 98%) | **KEEP** | REVIEW |
+| *(default)* | None of the above | **KEEP** | HIGH |
 
-### Safety overrides
-
-To prevent false positives, a removal is **vetoed** (page kept) if any of these fire:
-
-- Page *i* has text blocks with <50% word overlap against page *i*+1 *(fuzzy matching — tolerates text inserted mid-block)*
-- Page *i* has images not present in page *i*+1 *(compared by PDF xref)*
-- Page *i* has ≤10 characters of text *(empty / image-only pages)*
+- Levels 1–2: Classic Beamer `\pause` — content accumulates across pages.
+- Level 3: Catches reordered headers, e.g. `"Outline"` → `"Overview Outline"`.
+- Level 4: Text-extraction artifacts / formula rendering differences. Flagged as MEDIUM — review recommended but auto-removed.
+- Level 5: **Borderline — KEPT for safety, flagged for human review.** These pages are too similar to ignore but not similar enough for confident auto-removal. The summary will list them so you can manually decide.
 
 The **last page is always kept**.
 
@@ -315,10 +326,14 @@ Summary
     Word-set subsets:           1
     Near-duplicates:            3
 
-  ⚠  Non-HIGH-confidence removals (3):
+  ⚠  MEDIUM-confidence removals (3) — these were auto-removed, review recommended:
     Page   3 [MEDIUM]: near-duplicate (similarity=1.0000)
     Page 132 [MEDIUM]: near-duplicate (similarity=0.9831)
     Page 345 [MEDIUM]: near-duplicate (similarity=1.0000)
+
+  ⚑  Pages flagged for manual review (2) — these were KEPT for safety:
+    Page  50 [REVIEW]: borderline similarity (0.9567) — kept for safety, please review
+    Page 278 [REVIEW]: borderline similarity (0.9412) — kept for safety, please review
 
   Output written to: lecture_clean.pdf
   Input size:  2.1 MB
